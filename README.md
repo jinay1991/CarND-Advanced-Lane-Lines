@@ -377,8 +377,8 @@ This resulted in the following source and destination points:
 |:-------------:|:-------------:|
 | 580, 460      | 200 , 0       |
 | 710, 460      | 1080, 0       |
-| 1150, 720     | 1080, 720     |
-| 150, 720      | 200 , 720     |
+| 1100, 720     | 1080, 720     |
+| 200, 720      | 200 , 720     |
 
 I verified that my perspective transform was working as expected by drawing the `src` and `dst` points onto a test image and its warped counterpart to verify that the lines appear parallel in the warped image.
 
