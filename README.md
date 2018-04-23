@@ -467,9 +467,7 @@ ax2.axis('off')
 
 Then I did some other stuff and fit my lane lines with a 2nd order polynomial kinda like this:
 
-[image1]: ./examples/color_fit_lines.jpg "Fit Visual"
-
-![atl text] [image1]
+![atl text][image5]
 
 
 ```python
@@ -496,16 +494,14 @@ def find_curvature(yvals, fitx):
     curverad = ((1 + (2*fit_cr[0]*y_eval*ym_per_pix + fit_cr[1])**2)**1.5) / np.absolute(2*fit_cr[0])
     return curverad
 
-def find_position(pts, width):
-    # Find the position of the car from the center
-    # It will show if the car is 'x' meters from the left or right
-    position = width/2
-    left  = np.min(pts[(pts[:,1] < position) & (pts[:,0] > 700)][:,1])
-    right = np.max(pts[(pts[:,1] > position) & (pts[:,0] > 700)][:,1])
-    center = (left + right)/2
-    # Define conversions in x and y from pixels space to meters
+def find_pos(l_fit, r_fit, w, h):
     xm_per_pix = 3.7/700 # meteres per pixel in x dimension
-    return (position - center)*xm_per_pix
+    car_position = w / 2
+    l_fit_x_int = l_fit[0]*h**2 + l_fit[1]*h + l_fit[2]
+    r_fit_x_int = r_fit[0]*h**2 + r_fit[1]*h + r_fit[2]
+    lane_center_position = (r_fit_x_int + l_fit_x_int) /2
+    center_dist = (car_position - lane_center_position) * xm_per_pix
+    return center_dist
 
 def find_peaks(binary_warped):
     # Find the peak of the left and right halves of the histogram
@@ -572,9 +568,9 @@ def sliding_window(binary_warped, left_lane, right_lane, nwindows=9, margin=100,
         right_lane_inds = np.concatenate(right_lane_inds)
 
     else:
-        left_fit = left_lane.current_fit
-        right_fit = right_lane.current_fit
-        left_lane_inds = ((nonzerox > (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy +  left_fit[2] - margin)) &
+        left_fit = left_lane.current_fit[-1]
+        right_fit = right_lane.current_fit[-1]
+        left_lane_inds = ((nonzerox > (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] - margin)) &
                           (nonzerox < (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] + margin)))
 
         right_lane_inds = ((nonzerox > (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] - margin)) &
@@ -587,55 +583,10 @@ def sliding_window(binary_warped, left_lane, right_lane, nwindows=9, margin=100,
     righty = nonzeroy[right_lane_inds]
 
     # Fit a second order polynomial to each
-    left_fit = np.polyfit(lefty, leftx, 2)
-    right_fit = np.polyfit(righty, rightx, 2)
+    left_fit = np.polyfit(lefty, leftx, 2)# if len(leftx) != 0 else None
+    right_fit = np.polyfit(righty, rightx, 2)# if len(rightx) != 0 else None
 
     return left_fit, right_fit, left_lane_inds, right_lane_inds
-```
-
-Below are the helper functions for performing sanity checks satisfying conditions:
-- Checking that they have similar curvature
-- Checking that they are separated by approximately the right distance horizontally
-- Checking that they are roughly parallel
-
-
-```python
-def sanity_check(lane, curverad, fitx, fit):
-    # Sanity check for the lane
-    if lane.detected: # If lane is detected
-        # If sanity check passes
-        if abs(curverad / lane.radius_of_curvature - 1) < .6:
-            lane.detected = True
-            lane.current_fit = fit
-            lane.allx = fitx
-            lane.bestx = np.mean(fitx)
-            lane.radius_of_curvature = curverad
-            lane.current_fit = fit
-        # If sanity check fails use the previous values
-        else:
-            lane.detected = False
-            fitx = lane.allx
-    else:
-        # If lane was not detected and no curvature is defined
-        if lane.radius_of_curvature:
-            if abs(curverad / lane.radius_of_curvature - 1) < 1:
-                lane.detected = True
-                lane.current_fit = fit
-                lane.allx = fitx
-                lane.bestx = np.mean(fitx)
-                lane.radius_of_curvature = curverad
-                lane.current_fit = fit
-            else:
-                lane.detected = False
-                fitx = lane.allx
-        # If curvature was defined
-        else:
-            lane.detected = True
-            lane.current_fit = fit
-            lane.allx = fitx
-            lane.bestx = np.mean(fitx)
-            lane.radius_of_curvature = curverad
-    return fitx
 ```
 
 
@@ -651,8 +602,8 @@ def fitLines(binary_warped, left_lane, right_lane):
     left_curverad = find_curvature(ploty, left_fitx)
     right_curverad = find_curvature(ploty, right_fitx)
 
-    left_fitx  = sanity_check(left_lane, left_curverad, left_fitx, left_fit)
-    right_fitx = sanity_check(right_lane, right_curverad, right_fitx, right_fit)
+    left_lane.add_line(left_fit, left_lane_inds)
+    right_lane.add_line(right_fit, right_lane_inds)
 
     return left_fitx, right_fitx, left_fit, right_fit, left_lane_inds, right_lane_inds, left_curverad, right_curverad
 
@@ -668,7 +619,7 @@ def visualizeLines(binary_warped, left_lane_inds, right_lane_inds):
 
     return out_img
 
-def visualizeLanes(undist, binary_warped, left_fitx, right_fitx, left_curve, right_curve):
+def visualizeLanes(undist, binary_warped, left_fitx, right_fitx, left_fit, right_fit, left_curve, right_curve):
     # Create an image to draw the lines on
     warp_zero = np.zeros_like(binary_warped).astype(np.uint8)
     color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
@@ -694,8 +645,10 @@ def visualizeLanes(undist, binary_warped, left_fitx, right_fitx, left_curve, rig
     text = "Radius of Curvature: {} m".format(curvature)
     cv2.putText(result,text,(400,100), font, 1,(255,255,255),2)
     # Find the position of the car
-    pts = np.argwhere(newwarp[:,:,1])
-    position = find_position(pts, undist.shape[1])
+    #pts = np.argwhere(newwarp[:,:,1])
+    #position = find_position(pts, undist.shape[1])
+    h, w = binary_warped.shape[:2]
+    position = find_pos(left_fit, right_fit, w, h)
     if position < 0:
         text = "Vehicle is {:.2f} m left of center".format(-position)
     else:
@@ -710,6 +663,7 @@ def visualizeLanes(undist, binary_warped, left_fitx, right_fitx, left_curve, rig
 
 
 ```python
+diag = False
 def process_image(image, display=False):
     """
     Complete Pipeline
@@ -730,14 +684,20 @@ def process_image(image, display=False):
     lanes_img = visualizeLines(warped, l_ind, r_ind)
 
     # Visualize lane lines on undistorted image 2D view
-    vis_in = visualizeLanes(undist, warped, lfx, rfx, lc, rc)
+    result = visualizeLanes(undist, warped, lfx, rfx, lf, rf, lc, rc)
+
+    if diag:
+        threshold[threshold > 0] = 255
+        thresh_3_channel = np.dstack((threshold, threshold, threshold))
+        result1 = np.hstack((undist, result, ))
+        result2 = np.hstack((thresh_3_channel, lanes_img))
+        result = np.vstack((result1, result2))
 
     if display:
         showImages([("image", undist), ("thresh", threshold),
-                    ("lanes_img", lanes_img), ("result", vis_in)],
+                    ("lanes_img", lanes_img), ("result", result)],
                    4, 1, figsize=(20, 9))
-
-    return vis_in
+    return result
 ```
 
 
@@ -765,22 +725,43 @@ class Line():
         self.allx = None
         #y values for detected line pixels
         self.ally = None
-        #x values in windows
-        self.windows = np.ones((3,12))*-1
+        #number of detected pixels
+        self.pix_count = None
+
+    def add_line(self, fit, inds):
+        if fit is not None:
+            if self.best_fit is not None:
+                self.diffs = abs(fit - self.best_fit)
+            if (self.diffs[0] > 0.001 or self.diffs[1] > 1.0 or self.diffs[2] > 100. and len(self.current_fit) > 5):
+                self.detected = False
+            else:
+                self.detected = True
+                self.pix_count = np.count_nonzero(inds)
+                self.current_fit.append(fit)
+                if len(self.current_fit) > 5:
+                    self.current_fit = self.current_fit[len(self.current_fit) - 5:]
+                self.best_fit = np.average(self.current_fit, axis=0)
+        else:
+            self.detected = False
+            if len(self.current_fit) > 0:
+                self.current_fit = self.current_fit[:len(self.current_fit) - 1]
+            if len(self.current_fit) > 0:
+                self.best_fit = np.average(self.current_fit, axis=0)
+
 ```
 
 
 ```python
 left_lane = Line()
 right_lane = Line()
-vis_in = process_image(undist_test1, True)
+vis_in = process_image(undist_test1, display=True)
 ```
 
     Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
 
 
 
-![png](output_images/output_32_1.png)
+![png](output_images/output_30_1.png)
 
 
 ### 6. Provide an example image of your result plotted back down onto the road such that the lane area is identified clearly.
@@ -795,14 +776,14 @@ plt.imshow(vis_in), plt.title("Lane area"), plt.axis("off")
 
 
 
-    (<matplotlib.image.AxesImage at 0x235a16c2748>,
+    (<matplotlib.image.AxesImage at 0x19a363c5860>,
      Text(0.5,1,'Lane area'),
      (-0.5, 1279.5, 719.5, -0.5))
 
 
 
 
-![png](output_images/output_34_1.png)
+![png](output_images/output_32_1.png)
 
 
 #### Run on all the test images
@@ -812,41 +793,41 @@ plt.imshow(vis_in), plt.title("Lane area"), plt.axis("off")
 for fname, image in testImages:
     left_lane = Line()
     right_lane = Line()
-    result = process_image(image)
+    result = process_image(image, display=False)
 
     showImages([(fname, image), ("result", result)], 2, 1)
 ```
 
 
-![png](output_images/output_36_0.png)
+![png](output_images/output_34_0.png)
 
 
 
-![png](output_images/output_36_1.png)
+![png](output_images/output_34_1.png)
 
 
 
-![png](output_images/output_36_2.png)
+![png](output_images/output_34_2.png)
 
 
 
-![png](output_images/output_36_3.png)
+![png](output_images/output_34_3.png)
 
 
 
-![png](output_images/output_36_4.png)
+![png](output_images/output_34_4.png)
 
 
 
-![png](output_images/output_36_5.png)
+![png](output_images/output_34_5.png)
 
 
 
-![png](output_images/output_36_6.png)
+![png](output_images/output_34_6.png)
 
 
 
-![png](output_images/output_36_7.png)
+![png](output_images/output_34_7.png)
 
 
 ---
@@ -859,36 +840,34 @@ Here's a [link to project video](./project_video.mp4)
 
 Here's a [link to my project video result](./result.mp4)
 
-#### Project Video
+Here's a [link to my project video result with diagnostic info image](./result_diag.mp4)
 
 
 ```python
 from moviepy.editor import VideoFileClip
 from IPython.display import HTML
-
-left_lane = Line()
-right_lane = Line()
-
-video_output = 'result.mp4'
-clip1 = VideoFileClip("project_video.mp4")
-white_clip = clip1.fl_image(process_image)
-
-%time white_clip.write_videofile(video_output, audio=False)
 ```
 
+#### Project Video
+
+
+```python
+left_lane = Line()
+right_lane = Line()
+diag = False
+video_output1 = 'result.mp4'
+clip1 = VideoFileClip("project_video.mp4")
+result_clip1 = clip1.fl_image(process_image)
+
+%time result_clip1.write_videofile(video_output1, audio=False)
+```
     [MoviePy] >>>> Building video result.mp4
     [MoviePy] Writing video result.mp4
-
-
-    100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▊| 1260/1261 [06:29<00:00,  3.24it/s]
-
-
+    100%|████████████████████████████████▉| 1260/1261 [06:55<00:00,  3.03it/s]
     [MoviePy] Done.
     [MoviePy] >>>> Video ready: result.mp4
 
-    Wall time: 6min 29s
-
-
+    Wall time: 6min 56s
 
 ```python
 HTML("""
@@ -898,16 +877,35 @@ HTML("""
 </video></div>""")
 ```
 
+#### Project Video (with diagnostic image previews)
 
 
+```python
+left_lane = Line()
+right_lane = Line()
+diag = True
+video_output2 = 'result_diag.mp4'
+clip2 = VideoFileClip("project_video.mp4")
+result_clip2 = clip2.fl_image(process_image)
 
+%time result_clip2.write_videofile(video_output2, audio=False)
+```
 
+    [MoviePy] >>>> Building video result_diag.mp4
+    [MoviePy] Writing video result_diag.mp4
+    100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▊| 1260/1261 [09:31<00:00,  2.21it/s]
+    [MoviePy] Done.
+    [MoviePy] >>>> Video ready: result_diag.mp4
+
+    Wall time: 9min 32s
+
+```python
+HTML("""
 <div align="middle">
 <video width="80%" controls>
-      <source src="result.mp4" type="video/mp4">
-</video></div>
-
-
+      <source src="result_diag.mp4" type="video/mp4">
+</video></div>""")
+```
 
 ---
 
